@@ -1,14 +1,10 @@
 import streamlit as st
 import random
 import time
+import json
 from typing import List
 from dataclasses import dataclass
-from enum import Enum
-
-class Difficulty(Enum):
-    EASY = "Easy"
-    MEDIUM = "Medium"
-    HARD = "Hard"
+from streamlit.components.v1 import html
 
 @dataclass
 class Team:
@@ -26,38 +22,86 @@ class GameState:
     game_started: bool
     countdown_started: bool
     countdown_time: float
-    difficulty: Difficulty
+    max_points: int
+    game_ended: bool = False
+    winner: Team = None
+
+def create_timer_html(seconds: int, timer_id: str = "timer") -> str:
+    """Create HTML timer component for countdown in seconds."""
+    return f"""
+    <div id="{timer_id}" style="text-align: center; font-family: sans-serif;">
+        <div style="font-size: 48px; font-weight: bold; color: #1f77b4; margin: 20px 0;">
+            <span id="{timer_id}_seconds">{seconds:02d}</span>
+        </div>
+        <div style="font-size: 16px; color: #666;">seconds remaining</div>
+    </div>
+    
+    <script>
+    function startTimer(timerId, duration) {{
+        const timerElement = document.getElementById(timerId);
+        const secondsSpan = document.getElementById(timerId + '_seconds');
+        
+        function updateTimer() {{
+            const minutes = Math.floor(duration / 60);
+            const seconds = duration % 60;
+            
+            secondsSpan.textContent = seconds.toString().padStart(2, '0');
+            
+            // Change color based on remaining time
+            if (duration <= 10) {{
+                secondsSpan.style.color = '#ff4444';
+                timerElement.style.animation = 'pulse 0.5s infinite';
+            }} else if (duration <= 30) {{
+                secondsSpan.style.color = '#ff8800';
+            }} else {{
+                secondsSpan.style.color = '#1f77b4';
+            }}
+            
+            if (duration <= 0) {{
+                clearInterval(interval);
+                secondsSpan.textContent = '00';
+                secondsSpan.style.color = '#ff0000';
+                timerElement.style.animation = 'none';
+            }}
+            
+            duration--;
+        }}
+        
+        updateTimer(); // Initial call
+        const interval = setInterval(updateTimer, 1000);
+        
+        // Return the interval ID so it can be cleared if needed
+        return interval;
+    }}
+    
+    // Start the timer when the component loads
+    const timerInterval = startTimer('{timer_id}', {seconds});
+    </script>
+    
+    <style>
+    @keyframes pulse {{
+        0% {{ transform: scale(1); }}
+        50% {{ transform: scale(1.05); }}
+        100% {{ transform: scale(1); }}
+    }}
+    </style>
+    """
 
 class AliasGame:
     def __init__(self):
-        self.word_list = [
-                "cat", "dog", "house", "car", "book", "tree", "sun", "moon", "water", "food",
-                "happy", "sad", "big", "small", "red", "blue", "green", "yellow", "fast", "slow",
-                "hot", "cold", "up", "down", "left", "right", "yes", "no", "good", "bad",
-                "friend", "family", "school", "work", "play", "sleep", "eat", "drink", "walk", "run",
-                "music", "dance", "sing", "laugh", "smile", "cry", "think", "know", "see", "hear",
-                "adventure", "mystery", "journey", "discovery", "challenge", "opportunity", "creativity",
-                "imagination", "technology", "innovation", "tradition", "culture", "celebration",
-                "communication", "relationship", "experience", "knowledge", "education", "development",
-                "environment", "sustainability", "responsibility", "leadership", "teamwork", "collaboration",
-                "achievement", "success", "failure", "mistake", "learning", "improvement", "progress",
-                "freedom", "independence", "choice", "decision", "consequence", "result", "outcome",
-                "possibility", "potential", "future", "present", "past", "memory", "history", "story",
-                "philosophy", "psychology", "sociology", "anthropology", "archaeology", "meteorology",
-                "astronomy", "astrophysics", "quantum", "relativity", "consciousness", "subconscious",
-                "unconscious", "meditation", "mindfulness", "enlightenment", "transcendence", "nirvana",
-                "karma", "dharma", "zen", "tao", "yin", "yang", "chakra", "aura", "energy", "vibration",
-                "frequency", "resonance", "harmony", "balance", "equilibrium", "symmetry", "asymmetry",
-                "paradox", "contradiction", "irony", "sarcasm", "satire", "allegory", "metaphor", "simile",
-                "analogy", "comparison", "contrast", "juxtaposition", "oxymoron", "euphemism", "hyperbole"
-        ]
+        # Load Hebrew words from JSON file
+        try:
+            with open('hebrew_words.json', 'r', encoding='utf-8') as f:
+                self.word_list = json.load(f)
+        except FileNotFoundError:
+            st.error("Hebrew words file not found! Please make sure 'hebrew_words.json' is in the same directory.")
+            self.word_list = ["שגיאה", "קובץ", "לא", "נמצא"]  # Fallback words
     
-    def get_random_word(self, difficulty: Difficulty) -> str:
-        """Get a random word from the specified difficulty level."""
-        words = self.word_list
-        return random.choice(words)
+    def get_random_word(self) -> str:
+        """Get a random word from the Hebrew word list."""
+        return random.choice(self.word_list)
     
-    def initialize_game(self, team_names: List[str], difficulty: Difficulty, round_time: int) -> GameState:
+    def initialize_game(self, team_names: List[str], round_time: int, max_points: int) -> GameState:
         """Initialize a new game with teams and settings."""
         teams = [Team(name=name) for name in team_names]
         return GameState(
@@ -70,7 +114,7 @@ class AliasGame:
             game_started=False,
             countdown_started=False,
             countdown_time=0,
-            difficulty=difficulty
+            max_points=max_points
         )
     
     def start_countdown(self, game_state: GameState) -> GameState:
@@ -81,7 +125,7 @@ class AliasGame:
     
     def start_round(self, game_state: GameState) -> GameState:
         """Start a new round for the current team after countdown."""
-        game_state.current_word = self.get_random_word(game_state.difficulty)
+        game_state.current_word = self.get_random_word()
         game_state.guessed_words = []
         game_state.round_start_time = time.time()
         game_state.game_started = True
@@ -92,12 +136,20 @@ class AliasGame:
         """Mark current word as successfully guessed."""
         game_state.guessed_words.append(game_state.current_word)
         game_state.teams[game_state.current_team_index].score += 1
-        game_state.current_word = self.get_random_word(game_state.difficulty)
+        
+        # Check for winner
+        if game_state.teams[game_state.current_team_index].score >= game_state.max_points:
+            game_state.game_ended = True
+            game_state.winner = game_state.teams[game_state.current_team_index]
+            game_state.game_started = False
+        else:
+            game_state.current_word = self.get_random_word()
+        
         return game_state
     
     def skip_word(self, game_state: GameState) -> GameState:
         """Skip the current word and get a new one."""
-        game_state.current_word = self.get_random_word(game_state.difficulty)
+        game_state.current_word = self.get_random_word()
         return game_state
     
     def enemy_guessed(self, game_state: GameState) -> GameState:
@@ -173,21 +225,15 @@ def main():
         
         with col2:
             st.subheader("Game Settings")
-            difficulty = st.selectbox(
-                "Difficulty",
-                options=[Difficulty.EASY, Difficulty.MEDIUM, Difficulty.HARD]
-            )
-
-            print(difficulty)
-            
             round_time = st.slider("Round time (seconds)", min_value=30, max_value=180, value=60)
+            max_points = st.number_input("Points to win", min_value=5, max_value=100, value=20, help="First team to reach this score wins!")
         
         if st.button("Start Game", type="primary"):
             if len(set(team_names)) != len(team_names):
                 st.error("Team names must be unique!")
             else:
                 st.session_state.game_state = st.session_state.game.initialize_game(
-                    team_names, difficulty, round_time
+                    team_names, round_time, max_points
                 )
                 st.rerun()
     
@@ -195,6 +241,28 @@ def main():
         # Game interface
         game_state = st.session_state.game_state
         current_team = game_state.teams[game_state.current_team_index]
+        
+        # Check if game has ended
+        if game_state.game_ended and game_state.winner:
+            st.balloons()
+            st.success(f"🎉 **{game_state.winner.name}** wins with {game_state.winner.score} points! 🎉")
+            st.markdown("---")
+            
+            # Show final leaderboard
+            st.subheader("🏆 Final Results")
+            sorted_teams = sorted(game_state.teams, key=lambda x: x.score, reverse=True)
+            for i, team in enumerate(sorted_teams):
+                if team == game_state.winner:
+                    st.markdown(f"🥇 **{team.name}**: {team.score} points - **WINNER!**")
+                else:
+                    medal = "🥈" if i == 1 else "🥉" if i == 2 else "🏅"
+                    st.markdown(f"{medal} **{team.name}**: {team.score} points")
+            
+            if st.button("🎮 New Game", type="primary"):
+                st.session_state.game_state = None
+                st.rerun()
+            
+            return
         
         # Header with team info and timer
         col1, col2, col3 = st.columns([2, 1, 1])
@@ -205,7 +273,49 @@ def main():
         
         with col2:
             remaining_time = st.session_state.game.get_remaining_time(game_state)
-            st.metric("Time Remaining", f"{remaining_time}s")
+            
+            # Use HTML timer for better performance
+            if game_state.game_started:
+                html(create_timer_html(remaining_time, "game_timer"), height=120)
+                
+                # Add warning messages
+                if remaining_time <= 10 and remaining_time > 0:
+                    st.warning("⏰ Time running out!")
+                elif remaining_time == 0:
+                    st.error("⏰ TIME'S UP!")
+                    # Play buzz sound when time runs out
+                    st.markdown("""
+                    <script>
+                    // Simple beep sound using Web Audio API
+                    function playBuzz() {
+                        try {
+                            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                            const oscillator = audioContext.createOscillator();
+                            const gainNode = audioContext.createGain();
+                            
+                            oscillator.connect(gainNode);
+                            gainNode.connect(audioContext.destination);
+                            
+                            // Create a descending buzz sound
+                            oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+                            oscillator.frequency.exponentialRampToValueAtTime(200, audioContext.currentTime + 0.5);
+                            
+                            gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+                            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+                            
+                            oscillator.start(audioContext.currentTime);
+                            oscillator.stop(audioContext.currentTime + 0.5);
+                        } catch (e) {
+                            console.log('Audio not supported');
+                        }
+                    }
+                    
+                    // Play the sound
+                    playBuzz();
+                    </script>
+                    """, unsafe_allow_html=True)
+            else:
+                st.metric("Time Remaining", f"{remaining_time}s")
         
         with col3:
             if st.button("End Round"):
@@ -223,11 +333,17 @@ def main():
         elif game_state.countdown_started and not game_state.game_started:
             countdown_num = st.session_state.game.get_countdown_number(game_state)
             if countdown_num > 0:
-                # Center the countdown
+                # Center the countdown using HTML
                 col1, col2, col3 = st.columns([1, 2, 1])
                 with col2:
-                    st.markdown(f"# {countdown_num}")
-                    st.markdown("### Get ready to describe words!")
+                    html(f"""
+                    <div style="text-align: center; font-family: sans-serif;">
+                        <div style="font-size: 72px; font-weight: bold; color: #1f77b4; margin: 20px 0;">
+                            {countdown_num}
+                        </div>
+                        <div style="font-size: 24px; color: #666;">Get ready to describe words!</div>
+                    </div>
+                    """, height=150)
                 time.sleep(1)
                 st.rerun()
             else:
@@ -236,14 +352,14 @@ def main():
                 st.rerun()
         
         else:
-            # Timer progress bar
-            progress = (game_state.round_time - remaining_time) / game_state.round_time
-            st.progress(progress)
-            
             # Current word display
             st.markdown("---")
             st.markdown(f"### Current Word: **{game_state.current_word.upper()}**")
             st.markdown("---")
+            
+            # Timer progress bar
+            progress = (game_state.round_time - remaining_time) / game_state.round_time
+            st.progress(progress)
             
             # Action buttons
             col1, col2 = st.columns(2)
@@ -277,12 +393,13 @@ def main():
         
         # Leaderboard
         st.markdown("---")
-        st.subheader("Leaderboard")
+        st.subheader(f"Leaderboard (First to {game_state.max_points} points wins!)")
         
         sorted_teams = sorted(game_state.teams, key=lambda x: x.score, reverse=True)
         for i, team in enumerate(sorted_teams):
             medal = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else "🏅"
-            st.write(f"{medal} **{team.name}**: {team.score} points")
+            st.progress(team.score / game_state.max_points)
+            st.write(f"{medal} **{team.name}**: {team.score}/{game_state.max_points} points")
         
         # Reset game button
         if st.button("Reset Game"):
