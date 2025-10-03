@@ -33,13 +33,37 @@ def create_timer_html(seconds: int, timer_id: str = "timer") -> str:
         <div style="font-size: 48px; font-weight: bold; color: #1f77b4; margin: 20px 0;">
             <span id="{timer_id}_seconds">{seconds:02d}</span>
         </div>
-        <div style="font-size: 16px; color: #666;">seconds remaining</div>
+        <div style="font-size: 16px; color: #666;">שניות נותרו</div>
     </div>
     
     <script>
     function startTimer(timerId, duration) {{
         const timerElement = document.getElementById(timerId);
         const secondsSpan = document.getElementById(timerId + '_seconds');
+        let hasBuzzed = false;
+
+        function playBuzz() {{
+            try {{
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+
+                oscillator.type = 'square';
+                oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+                oscillator.frequency.exponentialRampToValueAtTime(200, audioContext.currentTime + 0.5);
+
+                gainNode.gain.setValueAtTime(0.25, audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+
+                oscillator.start(audioContext.currentTime);
+                oscillator.stop(audioContext.currentTime + 0.5);
+            }} catch (e) {{
+                console.log('Audio not supported');
+            }}
+        }}
         
         function updateTimer() {{
             const minutes = Math.floor(duration / 60);
@@ -62,6 +86,10 @@ def create_timer_html(seconds: int, timer_id: str = "timer") -> str:
                 secondsSpan.textContent = '00';
                 secondsSpan.style.color = '#ff0000';
                 timerElement.style.animation = 'none';
+                if (!hasBuzzed) {{
+                    hasBuzzed = true;
+                    playBuzz();
+                }}
             }}
             
             duration--;
@@ -149,6 +177,8 @@ class AliasGame:
     
     def skip_word(self, game_state: GameState) -> GameState:
         """Skip the current word and get a new one."""
+        current_team = game_state.teams[game_state.current_team_index]
+        current_team.score = max(0, current_team.score - 1)
         game_state.current_word = self.get_random_word()
         return game_state
     
@@ -194,13 +224,24 @@ class AliasGame:
 
 def main():
     st.set_page_config(
-        page_title="Alias Game",
+        page_title="עליס - משחק מילים",
         page_icon="🎯",
         layout="wide"
     )
+    st.markdown("""
+    <style>
+    html, body, [class*="css"], .stMarkdown, .stButton, .stMetric, .stAlert, .stSelectbox, .stTextInput {
+        direction: rtl;
+        text-align: right;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, Helvetica, "Noto Sans", "Noto Sans Hebrew", sans-serif;
+    }
+    /* Keep sliders LTR so selection and thumb behave normally */
+    .stSlider, .stSlider * { direction: ltr !important; text-align: left !important; }
+    </style>
+    """, unsafe_allow_html=True)
     
-    st.title("🎯 Alias Game")
-    st.markdown("A word guessing game where teams try to guess words without using the word itself!")
+    st.title("🎯 עליס - משחק מילים")
+    st.markdown("משחק ניחוש מילים בו הקבוצות מנסות לנחש מילים מבלי להשתמש במילה עצמה!")
     
     # Initialize session state
     if 'game' not in st.session_state:
@@ -210,27 +251,27 @@ def main():
     
     # Game setup
     if st.session_state.game_state is None:
-        st.header("Game Setup")
+        st.header("הגדרת משחק")
         
         col1, col2 = st.columns(2)
         
         with col1:
-            st.subheader("Teams")
-            num_teams = st.number_input("Number of teams", min_value=2, max_value=6, value=2)
+            st.subheader("קבוצות")
+            num_teams = st.number_input("מספר קבוצות", min_value=2, max_value=6, value=2)
             
             team_names = []
             for i in range(num_teams):
-                name = st.text_input(f"Team {i+1} name", value=f"Team {i+1}", key=f"team_{i}")
+                name = st.text_input(f"שם קבוצה {i+1}", value=f"קבוצה {i+1}", key=f"team_{i}")
                 team_names.append(name)
         
         with col2:
-            st.subheader("Game Settings")
-            round_time = st.slider("Round time (seconds)", min_value=30, max_value=180, value=60)
-            max_points = st.number_input("Points to win", min_value=5, max_value=100, value=20, help="First team to reach this score wins!")
+            st.subheader("הגדרות משחק")
+            round_time = st.slider("זמן סבב (בשניות)", min_value=30, max_value=180, value=60)
+            max_points = st.number_input("נקודות לניצחון", min_value=5, max_value=100, value=20, help="הקבוצה הראשונה שתגיע לניקוד זה מנצחת!")
         
-        if st.button("Start Game", type="primary"):
+        if st.button("התחל משחק", type="primary"):
             if len(set(team_names)) != len(team_names):
-                st.error("Team names must be unique!")
+                st.error("שמות הקבוצות חייבים להיות ייחודיים!")
             else:
                 st.session_state.game_state = st.session_state.game.initialize_game(
                     team_names, round_time, max_points
@@ -268,8 +309,8 @@ def main():
         col1, col2, col3 = st.columns([2, 1, 1])
         
         with col1:
-            st.subheader(f"Current Team: {current_team.name}")
-            st.metric("Score", current_team.score)
+            st.subheader(f"קבוצה נוכחית: {current_team.name}")
+            st.metric("ניקוד", current_team.score)
         
         with col2:
             remaining_time = st.session_state.game.get_remaining_time(game_state)
@@ -280,9 +321,9 @@ def main():
                 
                 # Add warning messages
                 if remaining_time <= 10 and remaining_time > 0:
-                    st.warning("⏰ Time running out!")
+                    st.warning("⏰ הזמן כמעט נגמר!")
                 elif remaining_time == 0:
-                    st.error("⏰ TIME'S UP!")
+                    st.error("⏰ הזמן נגמר!")
                     # Play buzz sound when time runs out
                     st.markdown("""
                     <script>
@@ -315,17 +356,17 @@ def main():
                     </script>
                     """, unsafe_allow_html=True)
             else:
-                st.metric("Time Remaining", f"{remaining_time}s")
+                st.metric("זמן שנותר", f"{remaining_time}s")
         
         with col3:
-            if st.button("End Round"):
+            if st.button("סיום סבב"):
                 st.session_state.game_state = st.session_state.game.end_round(game_state)
                 st.rerun()
         
         # Game area
         if not game_state.game_started and not game_state.countdown_started:
-            st.info("Click 'Start Round' to begin!")
-            if st.button("Start Round", type="primary"):
+            st.info("לחצו על 'התחל סבב' כדי להתחיל!")
+            if st.button("התחל סבב", type="primary"):
                 st.session_state.game_state = st.session_state.game.start_countdown(game_state)
                 st.rerun()
         
@@ -341,7 +382,7 @@ def main():
                         <div style="font-size: 72px; font-weight: bold; color: #1f77b4; margin: 20px 0;">
                             {countdown_num}
                         </div>
-                        <div style="font-size: 24px; color: #666;">Get ready to describe words!</div>
+                        <div style="font-size: 24px; color: #666;">התכוננו לתאר מילים!</div>
                     </div>
                     """, height=150)
                 time.sleep(1)
@@ -354,7 +395,7 @@ def main():
         else:
             # Current word display
             st.markdown("---")
-            st.markdown(f"### Current Word: **{game_state.current_word.upper()}**")
+            st.markdown(f"### המילה הנוכחית: **{game_state.current_word.upper()}**")
             st.markdown("---")
             
             # Timer progress bar
@@ -365,24 +406,24 @@ def main():
             col1, col2 = st.columns(2)
             
             with col1:
-                if st.button("✅ SUCCESS", type="primary", use_container_width=True):
+                if st.button("✅ הצלחה", type="primary", use_container_width=True):
                     st.session_state.game_state = st.session_state.game.success_word(game_state)
                     st.rerun()
             
             with col2:
                 if remaining_time > 0:
-                    if st.button("⏭️ SKIP", use_container_width=True):
+                    if st.button("⏭️ דלג", use_container_width=True):
                         st.session_state.game_state = st.session_state.game.skip_word(game_state)
                         st.rerun()
                 else:
-                    st.warning("⏰ Time's up! Enemy gets a point if they guess this word.")
-                    if st.button("👹 ENEMY GUESSED", type="secondary", use_container_width=True):
+                    st.warning("⏰ הזמן נגמר! היריב יקבל נקודה אם ינחש את המילה.")
+                    if st.button("👹 היריב ניחש", type="secondary", use_container_width=True):
                         st.session_state.game_state = st.session_state.game.enemy_guessed(game_state)
                         st.rerun()
             
             # Guessed words display
             if game_state.guessed_words:
-                st.markdown("### Successfully Guessed Words:")
+                st.markdown("### מילים שניחשו בהצלחה:")
                 for word in game_state.guessed_words:
                     st.success(f"✓ {word}")
             
@@ -393,16 +434,16 @@ def main():
         
         # Leaderboard
         st.markdown("---")
-        st.subheader(f"Leaderboard (First to {game_state.max_points} points wins!)")
+        st.subheader(f"טבלת מובילים (ראשון ל-{game_state.max_points} נקודות מנצח!)")
         
         sorted_teams = sorted(game_state.teams, key=lambda x: x.score, reverse=True)
         for i, team in enumerate(sorted_teams):
             medal = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else "🏅"
             st.progress(team.score / game_state.max_points)
-            st.write(f"{medal} **{team.name}**: {team.score}/{game_state.max_points} points")
+            st.write(f"{medal} **{team.name}**: {team.score}/{game_state.max_points} נקודות")
         
         # Reset game button
-        if st.button("Reset Game"):
+        if st.button("איפוס משחק"):
             st.session_state.game_state = None
             st.rerun()
 
